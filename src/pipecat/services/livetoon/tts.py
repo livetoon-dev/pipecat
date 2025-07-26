@@ -128,7 +128,7 @@ class LivetoonTTSService(TTSService):
 
         # HTTP session for API calls
         self._session: aiohttp.ClientSession | None = None
-        
+
         logger.info(f"Initialized Livetoon TTS Service - URL: {self._api_url}, Voice: {voice_id}")
 
     def can_generate_metrics(self) -> bool:
@@ -146,20 +146,18 @@ class LivetoonTTSService(TTSService):
             frame: The StartFrame that triggered the start.
         """
         await super().start(frame)
-        
+
         # Create persistent session for better performance
         headers = {"Content-Type": "application/json"}
         if self._api_key:
             headers["Authorization"] = f"Bearer {self._api_key}"
-        
+
         connector = None
         if self._use_ssl:
             connector = aiohttp.TCPConnector(ssl=True)
-        
+
         self._session = aiohttp.ClientSession(
-            headers=headers,
-            connector=connector,
-            timeout=aiohttp.ClientTimeout(total=30)
+            headers=headers, connector=connector, timeout=aiohttp.ClientTimeout(total=30)
         )
         logger.debug("Livetoon TTS session started")
 
@@ -177,18 +175,18 @@ class LivetoonTTSService(TTSService):
 
     def language_to_service_language(self, language: Language) -> str | None:
         """Convert Pipecat language to service-specific language code.
-        
+
         Args:
             language: Pipecat language enum.
-            
+
         Returns:
             str | None: Service-specific language code or None.
         """
-        if hasattr(language, 'value'):
+        if hasattr(language, "value"):
             lang_code = language.value.lower()
         else:
             lang_code = str(language).lower()
-        
+
         # Support various Japanese language codes
         if lang_code in ["ja", "jp", "japanese", "jpn"]:
             return "ja"
@@ -197,7 +195,7 @@ class LivetoonTTSService(TTSService):
     @property
     def voice_id(self) -> str:
         """Get current voice ID.
-        
+
         Returns:
             str: Current voice identifier.
         """
@@ -205,7 +203,7 @@ class LivetoonTTSService(TTSService):
 
     def set_voice(self, voice: str):
         """Set the voice for synthesis.
-        
+
         Args:
             voice: Voice identifier to set.
         """
@@ -215,7 +213,7 @@ class LivetoonTTSService(TTSService):
 
     def update_settings(self, settings: dict[str, Any]):
         """Update TTS settings.
-        
+
         Args:
             settings: Dictionary of settings to update.
         """
@@ -227,15 +225,15 @@ class LivetoonTTSService(TTSService):
             self._params.beta = float(settings["beta"])
         if "speed" in settings:
             self._params.speed = float(settings["speed"])
-            
+
         logger.debug(f"Updated TTS settings: {settings}")
 
     def _wav_to_audio_array(self, wav_data: bytes) -> np.ndarray:
         """Convert WAV PCM data to numpy array.
-        
+
         Args:
             wav_data: Raw PCM audio data (without WAV header)
-            
+
         Returns:
             np.ndarray: Audio array in float32 format [-1, 1]
         """
@@ -251,65 +249,69 @@ class LivetoonTTSService(TTSService):
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         """Generate TTS audio frames from text using Livetoon TTS API.
-        
+
         Args:
             text: Text to synthesize
-            
+
         Yields:
             Frame: TTS frames (TTSStartedFrame, TTSTextFrame, TTSAudioRawFrame, TTSStoppedFrame)
         """
         logger.debug(f"Generating Livetoon TTS: [{text}]")
-        
+
         if not text.strip():
             logger.warning("Empty text provided for TTS")
             return
-            
+
         try:
             # Initialize session if needed
             if not self._session:
                 self._session = aiohttp.ClientSession()
-            
+
             # Start TTS metrics
             await self.start_ttfb_metrics()
-            
+
             # Emit TTS started frame
             yield TTSStartedFrame()
             yield TTSTextFrame(text)
-            
+
             # Prepare request data for Livetoon TTS API
             json_data = {
                 "text": text,
                 "voicepack": self._params.voice,
                 "alpha": self._params.alpha,
                 "beta": self._params.beta,
-                "speed": self._params.speed
+                "speed": self._params.speed,
             }
-            
+
             # Use streaming endpoint for better performance
             stream_url = f"{self._api_url}/speak/stream"
-            
+
             async with self._session.post(stream_url, json=json_data) as response:
                 if response.status != 200:
                     # Fallback to regular endpoint if streaming fails
-                    logger.warning(f"Streaming endpoint failed: {response.status}, trying regular endpoint")
+                    logger.warning(
+                        f"Streaming endpoint failed: {response.status}, trying regular endpoint"
+                    )
                     regular_url = f"{self._api_url}/speak"
-                    
+
                     async with self._session.post(regular_url, json=json_data) as fallback_response:
                         if fallback_response.status == 200:
                             audio_data = await fallback_response.read()
-                            
+
                             # Process complete audio data inline
-                            if audio_data.startswith(b'RIFF'):
+                            if audio_data.startswith(b"RIFF"):
                                 # Skip WAV header (44 bytes) to get raw PCM data
                                 pcm_data = audio_data[44:]
-                                logger.debug(f"Extracted {len(pcm_data)} bytes of PCM data from WAV (fallback)")
-                                
+                                logger.debug(
+                                    f"Extracted {len(pcm_data)} bytes of PCM data from WAV (fallback)"
+                                )
+
                                 # Split into chunks for streaming simulation
                                 chunk_size = 8192
                                 for i in range(0, len(pcm_data), chunk_size):
-                                    chunk = pcm_data[i:i + chunk_size]
+                                    chunk = pcm_data[i : i + chunk_size]
                                     yield self._create_audio_frame(chunk)
-                                    
+
                                 logger.debug(f"TTS completed (fallback mode)")
                             else:
                                 logger.error("Invalid audio format received (not WAV)")
@@ -317,7 +319,9 @@ class LivetoonTTSService(TTSService):
                                 return
                         else:
                             error_text = await fallback_response.text()
-                            logger.error(f"All endpoints failed: {fallback_response.status} - {error_text}")
+                            logger.error(
+                                f"All endpoints failed: {fallback_response.status} - {error_text}"
+                            )
                             yield ErrorFrame("TTS API connection failed")
                             return
                 else:
@@ -325,41 +329,41 @@ class LivetoonTTSService(TTSService):
                     inference_time = response.headers.get("X-Inference-Time")
                     if inference_time:
                         logger.debug(f"TTS inference time: {inference_time}s")
-                    
+
                     await self.stop_ttfb_metrics()
-                    
+
                     # Process streaming audio chunks
                     chunk_size = 8192  # 8KB chunks optimized for real-time processing
                     audio_buffer = b""
                     wav_header_size = 44  # Standard WAV header size
                     header_processed = False
-                    
+
                     async for chunk in response.content.iter_chunked(chunk_size):
                         if not chunk:
                             break
-                        
+
                         audio_buffer += chunk
-                        
+
                         # Skip WAV header for raw PCM output
                         if not header_processed and len(audio_buffer) >= wav_header_size:
                             # Extract raw PCM data (skip WAV header)
                             pcm_data = audio_buffer[wav_header_size:]
                             header_processed = True
-                            
+
                             if len(pcm_data) > 0:
                                 # Convert to audio array and yield frame
                                 yield self._create_audio_frame(pcm_data)
-                            
+
                             audio_buffer = b""
                         elif header_processed and len(audio_buffer) >= chunk_size:
                             # Process subsequent chunks
                             yield self._create_audio_frame(audio_buffer[:chunk_size])
                             audio_buffer = audio_buffer[chunk_size:]
-                        
+
                     # Process remaining audio data
                     if header_processed and len(audio_buffer) > 0:
                         yield self._create_audio_frame(audio_buffer)
-                
+
         except aiohttp.ClientError as e:
             logger.exception(f"HTTP error in Livetoon TTS: {e}")
             yield ErrorFrame(f"HTTP error: {str(e)}")
