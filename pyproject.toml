@@ -37,6 +37,7 @@ dependencies = [
     # Explicit dependency pins for Python 3.11+ compatibility
     "numba>=0.60.0,<1",
     "websockets>=13.1",
+    "ruff>=0.12.5",
 ]
 
 [project.urls]

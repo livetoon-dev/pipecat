@@ -250,8 +250,7 @@ class LivetoonTTSService(TTSService):
             return np.array([], dtype=np.float32)
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
-        """
-        Generate TTS audio frames from text using Livetoon TTS API.
+        """Generate TTS audio frames from text using Livetoon TTS API.
         
         Args:
             text: Text to synthesize
