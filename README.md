@@ -11,7 +11,15 @@
 ### Installation with Livetoon TTS
 
 ```bash
-pip install "pipecat-ai[livetoon]"
+# Clone the repository
+git clone https://github.com/livetoon-dev/pipecat.git
+cd pipecat
+
+# Install with Livetoon TTS support
+pip install "./[livetoon]"
+
+# Or install in development mode (editable)
+pip install -e "./[livetoon]"
 ```
 
 ### Quick Start with Livetoon TTS
