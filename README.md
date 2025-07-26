@@ -22,6 +22,8 @@ pip install "./[livetoon]"
 pip install -e "./[livetoon]"
 ```
 
+**Note**: This is a custom fork. The standard `pip install "pipecat-ai[livetoon]"` will not work as Livetoon TTS is not part of the official pipecat-ai package.
+
 ### Quick Start with Livetoon TTS
 
 ```python
