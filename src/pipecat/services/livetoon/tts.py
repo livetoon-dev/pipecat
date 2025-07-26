@@ -44,7 +44,10 @@ except ModuleNotFoundError as e:
 
 class LivetoonTTSParams(BaseModel):
     """Parameters for Livetoon TTS synthesis."""
-    voice: str = Field(default="default", description="Voice ID (default, men, yasaike, zange, uranai)")
+
+    voice: str = Field(
+        default="default", description="Voice ID (default, men, yasaike, zange, uranai)"
+    )
     alpha: float = Field(default=0.3, ge=0.0, le=1.0, description="Voice style control")
     beta: float = Field(default=0.7, ge=0.0, le=1.0, description="Voice emotion control")
     speed: float = Field(default=1.0, gt=0.1, le=4.0, description="Speech speed multiplier")
@@ -91,7 +94,7 @@ class LivetoonTTSService(TTSService):
 
         Args:
             api_key (str | None, optional): API key for authentication. Defaults to None.
-            api_url (str, optional): Server URL for Livetoon TTS service. 
+            api_url (str, optional): Server URL for Livetoon TTS service.
                 Defaults to "https://livetoon-tts.dev-livetoon.com".
             voice_id (str, optional): Voice identifier. Defaults to "default".
             sample_rate (int, optional): Audio sample rate in Hz. Defaults to 24000.
@@ -106,7 +109,7 @@ class LivetoonTTSService(TTSService):
             push_stop_frames=True,
             **kwargs,
         )
-        
+
         self._api_key = api_key
         self._api_url = api_url.rstrip('/')
         self._voice_id = voice_id
@@ -396,16 +399,12 @@ class LivetoonTTSService(TTSService):
         except Exception as e:
             logger.error(f"Error creating audio frame: {e}")
             # Return empty frame in case of error
-            return TTSAudioRawFrame(
-                audio=b"",
-                sample_rate=self._sample_rate,
-                num_channels=1
-            )
+            return TTSAudioRawFrame(audio=b"", sample_rate=self._sample_rate, num_channels=1)
 
     @classmethod
     def get_service_config(cls) -> dict[str, Any]:
         """Get service configuration for Livetoon TTS.
-        
+
         Returns:
             dict: Service configuration dictionary.
         """
@@ -419,27 +418,22 @@ class LivetoonTTSService(TTSService):
                 "api_key": None,  # Set your API key here
                 "voice_id": "default",
                 "sample_rate": 24000,
-                "params": {
-                    "alpha": 0.3,
-                    "beta": 0.7,
-                    "speed": 1.0,
-                    "language": "ja"
-                }
+                "params": {"alpha": 0.3, "beta": 0.7, "speed": 1.0, "language": "ja"}
             },
             "features": [
                 "streaming",
-                "voice_customization", 
+                "voice_customization",
                 "parameter_control",
                 "japanese_synthesis",
-                "real_time_processing"
+                "real_time_processing",
             ],
             "performance": {
                 "first_chunk_latency_ms": 260,
                 "chunk_size_bytes": 8192,
                 "sample_rate_hz": 24000,
                 "channels": 1,
-                "bit_depth": 16
-            }
+                "bit_depth": 16,
+            },
         }
 
 
