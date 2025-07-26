@@ -111,21 +111,21 @@ class LivetoonTTSService(TTSService):
         )
 
         self._api_key = api_key
-        self._api_url = api_url.rstrip('/')
+        self._api_url = api_url.rstrip("/")
         self._voice_id = voice_id
         self._sample_rate = sample_rate
         self._language_code = language
         self._use_ssl = use_ssl
-        
+
         # Set up parameters
         if params is None:
             params = LivetoonTTSService.InputParams(voice=voice_id)
         else:
             params.voice = voice_id
-        
+
         self._params = params
         self.set_voice(voice_id)
-        
+
         # HTTP session for API calls
         self._session: aiohttp.ClientSession | None = None
         
@@ -373,29 +373,27 @@ class LivetoonTTSService(TTSService):
 
     def _create_audio_frame(self, pcm_data: bytes) -> TTSAudioRawFrame:
         """Create an audio frame from PCM data.
-        
+
         Args:
             pcm_data: Raw PCM audio data
-            
+
         Returns:
             TTSAudioRawFrame: Audio frame
         """
         try:
             # Convert to audio array
             audio_array = self._wav_to_audio_array(pcm_data)
-            
+
             # Convert back to bytes (float32 format)
             audio_bytes = audio_array.tobytes()
-            
+
             frame = TTSAudioRawFrame(
-                audio=audio_bytes,
-                sample_rate=self._sample_rate,
-                num_channels=1
+                audio=audio_bytes, sample_rate=self._sample_rate, num_channels=1
             )
-            
+
             logger.debug(f"Created audio frame: {len(audio_bytes)} bytes")
             return frame
-            
+
         except Exception as e:
             logger.error(f"Error creating audio frame: {e}")
             # Return empty frame in case of error
@@ -418,7 +416,7 @@ class LivetoonTTSService(TTSService):
                 "api_key": None,  # Set your API key here
                 "voice_id": "default",
                 "sample_rate": 24000,
-                "params": {"alpha": 0.3, "beta": 0.7, "speed": 1.0, "language": "ja"}
+                "params": {"alpha": 0.3, "beta": 0.7, "speed": 1.0, "language": "ja"},
             },
             "features": [
                 "streaming",
