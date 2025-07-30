@@ -390,17 +390,18 @@ class LivetoonTTSService(TTSService):
             TTSAudioRawFrame: Audio frame
         """
         try:
-            # Convert to audio array
-            audio_array = self._wav_to_audio_array(pcm_data)
+            # Check if buffer size is valid for int16
+            if len(pcm_data) % 2 != 0:
+                logger.warning(f"PCM data size {len(pcm_data)} is not even, truncating")
+                pcm_data = pcm_data[:-1]
 
-            # Convert back to bytes (float32 format)
-            audio_bytes = audio_array.tobytes()
-
+            # Pass through the original int16 PCM data directly
+            # (Don't convert to float32 as that causes format mismatch)
             frame = TTSAudioRawFrame(
-                audio=audio_bytes, sample_rate=self._sample_rate, num_channels=1
+                audio=pcm_data, sample_rate=self._sample_rate, num_channels=1
             )
 
-            logger.debug(f"Created audio frame: {len(audio_bytes)} bytes")
+            logger.debug(f"Created audio frame: {len(pcm_data)} bytes (int16 PCM)")
             return frame
 
         except Exception as e:
