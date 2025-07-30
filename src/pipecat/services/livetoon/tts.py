@@ -238,6 +238,12 @@ class LivetoonTTSService(TTSService):
             np.ndarray: Audio array in float32 format [-1, 1]
         """
         try:
+            # Check if buffer size is a multiple of 2 (16-bit = 2 bytes)
+            if len(wav_data) % 2 != 0:
+                logger.warning(f"WAV data size {len(wav_data)} is not a multiple of 2, truncating last byte")
+                # Truncate to the nearest even number of bytes
+                wav_data = wav_data[:-1]
+            
             # Convert bytes to numpy array (assuming 16-bit PCM)
             audio_array = np.frombuffer(wav_data, dtype=np.int16)
             # Convert to float32 range [-1, 1]
