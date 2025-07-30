@@ -240,10 +240,12 @@ class LivetoonTTSService(TTSService):
         try:
             # Check if buffer size is a multiple of 2 (16-bit = 2 bytes)
             if len(wav_data) % 2 != 0:
-                logger.warning(f"WAV data size {len(wav_data)} is not a multiple of 2, truncating last byte")
+                logger.warning(
+                    f"WAV data size {len(wav_data)} is not a multiple of 2, truncating last byte"
+                )
                 # Truncate to the nearest even number of bytes
                 wav_data = wav_data[:-1]
-            
+
             # Convert bytes to numpy array (assuming 16-bit PCM)
             audio_array = np.frombuffer(wav_data, dtype=np.int16)
             # Convert to float32 range [-1, 1]
@@ -397,9 +399,7 @@ class LivetoonTTSService(TTSService):
 
             # Pass through the original int16 PCM data directly
             # (Don't convert to float32 as that causes format mismatch)
-            frame = TTSAudioRawFrame(
-                audio=pcm_data, sample_rate=self._sample_rate, num_channels=1
-            )
+            frame = TTSAudioRawFrame(audio=pcm_data, sample_rate=self._sample_rate, num_channels=1)
 
             logger.debug(f"Created audio frame: {len(pcm_data)} bytes (int16 PCM)")
             return frame
