@@ -33,7 +33,7 @@ from pipecat.services.livetoon import LivetoonTTSService
 tts_service = LivetoonTTSService(
     api_url="https://livetoon-tts.dev-livetoon.com",
     voice_id="yasaike",  # Available: default, men, yasaike, zange, uranai
-    sample_rate=24000,
+    sample_rate=16000, # for NVIDIA Digital Human
     params=LivetoonTTSService.InputParams(
         alpha=0.5,    # Voice style control (0.0-1.0)
         beta=0.8,     # Voice emotion control (0.0-1.0)
