@@ -129,17 +129,18 @@ class LivetoonTTSService(TTSService):
 
         # HTTP session for API calls
         self._session: aiohttp.ClientSession | None = None
-        
+
         # Setup resampler if target sample rate is different from source (24kHz)
         self._source_sample_rate = 24000
         self._resampler = None
         if self._sample_rate != self._source_sample_rate:
             self._resampler = create_stream_resampler(
-                input_sample_rate=self._source_sample_rate,
-                output_sample_rate=self._sample_rate
+                input_sample_rate=self._source_sample_rate, output_sample_rate=self._sample_rate
             )
 
-        logger.info(f"Initialized Livetoon TTS Service - URL: {self._api_url}, Voice: {voice_id}, Sample Rate: {sample_rate}")
+        logger.info(
+            f"Initialized Livetoon TTS Service - URL: {self._api_url}, Voice: {voice_id}, Sample Rate: {sample_rate}"
+        )
 
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate metrics.
@@ -411,11 +412,11 @@ class LivetoonTTSService(TTSService):
             if self._resampler:
                 # Resample from 24kHz to target sample rate
                 resampled_data = await self._resampler.resample(
-                    pcm_data, 
-                    self._source_sample_rate, 
-                    self._sample_rate
+                    pcm_data, self._source_sample_rate, self._sample_rate
                 )
-                logger.debug(f"Resampled {len(pcm_data)} bytes @ {self._source_sample_rate}Hz to {len(resampled_data)} bytes @ {self._sample_rate}Hz")
+                logger.debug(
+                    f"Resampled {len(pcm_data)} bytes @ {self._source_sample_rate}Hz to {len(resampled_data)} bytes @ {self._sample_rate}Hz"
+                )
                 pcm_data = resampled_data
 
             # Create frame with appropriate sample rate
