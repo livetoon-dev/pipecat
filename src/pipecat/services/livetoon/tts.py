@@ -19,6 +19,7 @@ import numpy as np
 from loguru import logger
 from pydantic import BaseModel, Field
 
+from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
@@ -128,8 +129,17 @@ class LivetoonTTSService(TTSService):
 
         # HTTP session for API calls
         self._session: aiohttp.ClientSession | None = None
+        
+        # Setup resampler if target sample rate is different from source (24kHz)
+        self._source_sample_rate = 24000
+        self._resampler = None
+        if self._sample_rate != self._source_sample_rate:
+            self._resampler = create_stream_resampler(
+                input_sample_rate=self._source_sample_rate,
+                output_sample_rate=self._sample_rate
+            )
 
-        logger.info(f"Initialized Livetoon TTS Service - URL: {self._api_url}, Voice: {voice_id}")
+        logger.info(f"Initialized Livetoon TTS Service - URL: {self._api_url}, Voice: {voice_id}, Sample Rate: {sample_rate}")
 
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate metrics.
@@ -318,7 +328,7 @@ class LivetoonTTSService(TTSService):
                                 chunk_size = 8192
                                 for i in range(0, len(pcm_data), chunk_size):
                                     chunk = pcm_data[i : i + chunk_size]
-                                    yield self._create_audio_frame(chunk)
+                                    yield await self._create_audio_frame(chunk)
 
                                 logger.debug(f"TTS completed (fallback mode)")
                             else:
@@ -360,17 +370,17 @@ class LivetoonTTSService(TTSService):
 
                             if len(pcm_data) > 0:
                                 # Convert to audio array and yield frame
-                                yield self._create_audio_frame(pcm_data)
+                                yield await self._create_audio_frame(pcm_data)
 
                             audio_buffer = b""
                         elif header_processed and len(audio_buffer) >= chunk_size:
                             # Process subsequent chunks
-                            yield self._create_audio_frame(audio_buffer[:chunk_size])
+                            yield await self._create_audio_frame(audio_buffer[:chunk_size])
                             audio_buffer = audio_buffer[chunk_size:]
 
                     # Process remaining audio data
                     if header_processed and len(audio_buffer) > 0:
-                        yield self._create_audio_frame(audio_buffer)
+                        yield await self._create_audio_frame(audio_buffer)
 
         except aiohttp.ClientError as e:
             logger.exception(f"HTTP error in Livetoon TTS: {e}")
@@ -382,14 +392,14 @@ class LivetoonTTSService(TTSService):
             # Emit TTS completed frame
             yield TTSStoppedFrame()
 
-    def _create_audio_frame(self, pcm_data: bytes) -> TTSAudioRawFrame:
-        """Create an audio frame from PCM data.
+    async def _create_audio_frame(self, pcm_data: bytes) -> TTSAudioRawFrame:
+        """Create an audio frame from PCM data with optional resampling.
 
         Args:
-            pcm_data: Raw PCM audio data
+            pcm_data: Raw PCM audio data at source sample rate (24kHz)
 
         Returns:
-            TTSAudioRawFrame: Audio frame
+            TTSAudioRawFrame: Audio frame at target sample rate
         """
         try:
             # Check if buffer size is valid for int16
@@ -397,11 +407,21 @@ class LivetoonTTSService(TTSService):
                 logger.warning(f"PCM data size {len(pcm_data)} is not even, truncating")
                 pcm_data = pcm_data[:-1]
 
-            # Pass through the original int16 PCM data directly
-            # (Don't convert to float32 as that causes format mismatch)
+            # Resample if needed
+            if self._resampler:
+                # Resample from 24kHz to target sample rate
+                resampled_data = await self._resampler.resample(
+                    pcm_data, 
+                    self._source_sample_rate, 
+                    self._sample_rate
+                )
+                logger.debug(f"Resampled {len(pcm_data)} bytes @ {self._source_sample_rate}Hz to {len(resampled_data)} bytes @ {self._sample_rate}Hz")
+                pcm_data = resampled_data
+
+            # Create frame with appropriate sample rate
             frame = TTSAudioRawFrame(audio=pcm_data, sample_rate=self._sample_rate, num_channels=1)
 
-            logger.debug(f"Created audio frame: {len(pcm_data)} bytes (int16 PCM)")
+            logger.debug(f"Created audio frame: {len(pcm_data)} bytes at {self._sample_rate}Hz")
             return frame
 
         except Exception as e:
