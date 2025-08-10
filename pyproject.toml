@@ -136,3 +136,8 @@ convention = "google"
 command_line = "--module pytest"
 source = ["src"]
 omit = ["*/tests/*"]
+
+[tool.uv.workspace]
+members = [
+    "test-installation",
+]

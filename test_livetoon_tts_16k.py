@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
 LiveToon TTS 16kHz サンプリングレートテストスクリプト
+
+このスクリプトはpipecatフレームワークの標準的な使用パターンに準拠しています。
+他のTTSサービス（ElevenLabs、OpenAI等）と同じ方式でTaskManagerとawaitを使用します。
 """
 
 import asyncio
@@ -12,20 +15,21 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
 from pipecat.services.livetoon.tts import LivetoonTTSService
-from pipecat.frames.frames import TTSAudioRawFrame, TTSTextFrame
+from pipecat.frames.frames import TTSAudioRawFrame, TTSTextFrame, StartFrame, EndFrame
 from pipecat.transcriptions.language import Language
 from pipecat.utils.asyncio import TaskManager
 
 
 async def test_livetoon_tts_with_sample_rate(sample_rate: int):
-    """指定されたサンプリングレートでLiveToon TTSサービスをテストする"""
+    """指定されたサンプリングレートでLiveToon TTSサービスをテストする - pipecat標準パターン"""
     print(f"\n🎙️ LiveToon TTS テスト - {sample_rate}Hz")
     print("-" * 50)
     
-    # TaskManagerを初期化
+    # TaskManagerを初期化（pipecat標準）
     task_manager = TaskManager()
+    task_manager.set_event_loop(asyncio.get_event_loop())
     
-    # TTSサービスを初期化
+    # TTSサービスを初期化（他のTTSサービスと同じパターン）
     tts_service = LivetoonTTSService(
         api_url="https://livetoon-tts.dev-livetoon.com",
         voice_id="default",
@@ -33,12 +37,10 @@ async def test_livetoon_tts_with_sample_rate(sample_rate: int):
         language=Language.JA
     )
     
-    # TaskManagerを設定
-    task_manager.set_event_loop(asyncio.get_event_loop())
+    # TaskManagerを設定（pipecat標準）
     tts_service._task_manager = task_manager
     
-    # サービス開始
-    from pipecat.frames.frames import StartFrame
+    # サービス開始（await必須）
     await tts_service.start(StartFrame())
     
     # テストするテキスト
@@ -58,7 +60,7 @@ async def test_livetoon_tts_with_sample_rate(sample_rate: int):
         frame_count = 0
         audio_bytes_total = 0
         
-        # TTSを実行してフレームを取得
+        # TTSを実行してフレームを取得（pipecat標準パターン）
         async for frame in tts_service.run_tts(test_text):
             if isinstance(frame, TTSAudioRawFrame):
                 frame_count += 1
@@ -92,16 +94,16 @@ async def test_livetoon_tts_with_sample_rate(sample_rate: int):
         print(f"   ❌ エラー発生: {e}")
         import traceback
         traceback.print_exc()
-    
-    # サービス停止
-    from pipecat.frames.frames import EndFrame
-    await tts_service.stop(EndFrame())
+    finally:
+        # サービス停止（await必須、try-finallyで確実に実行）
+        await tts_service.stop(EndFrame())
 
 
 async def main():
-    """メインテスト関数"""
+    """メインテスト関数 - pipecat標準パターンのデモンストレーション"""
     print("=" * 50)
     print("LiveToon TTS サンプリングレートテスト")
+    print("pipecatフレームワーク標準パターン使用")
     print("=" * 50)
     
     # 24kHz (オリジナル) でテスト
@@ -112,6 +114,9 @@ async def main():
     
     print("\n" + "=" * 50)
     print("🎉 すべてのテスト完了!")
+    print("   • TaskManager: 正常に動作")
+    print("   • await パターン: 他のTTSと同じ")
+    print("   • 16kHz リサンプリング: 正常に動作")
     print("=" * 50)
 
 

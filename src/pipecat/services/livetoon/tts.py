@@ -154,6 +154,20 @@ class LivetoonTTSService(TTSService):
         Args:
             frame: The StartFrame that triggered the start.
         """
+        # TaskManagerが初期化されていない場合の警告とガイダンス
+        if not hasattr(self, '_task_manager') or self._task_manager is None:
+            logger.warning("TaskManager is not initialized. For standalone usage, please initialize TaskManager:")
+            logger.warning("from pipecat.utils.asyncio import TaskManager")
+            logger.warning("task_manager = TaskManager()")
+            logger.warning("task_manager.set_event_loop(asyncio.get_event_loop())")
+            logger.warning("tts_service._task_manager = task_manager")
+            # 緊急時のフォールバック（推奨されない）
+            from pipecat.utils.asyncio import TaskManager
+            import asyncio
+            self._task_manager = TaskManager()
+            self._task_manager.set_event_loop(asyncio.get_event_loop())
+            logger.warning("TaskManager auto-initialized as fallback (not recommended for production)")
+            
         await super().start(frame)
 
         # Create persistent session for better performance

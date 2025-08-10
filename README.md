@@ -100,22 +100,42 @@ pip install "pipecat-ai[livetoon]"
 
 #### Usage Example
 
+**⚠️ Important**: LiveToon services use the same async patterns as all Pipecat TTS services (ElevenLabs, OpenAI, etc.). TaskManager and `await` are required.
+
 ```python
-from pipecat.services.livetoon import LivetoonTTSService, LiveToonSTTService
+import asyncio
+from pipecat.services.livetoon.tts import LivetoonTTSService
+from pipecat.frames.frames import StartFrame, EndFrame, TTSAudioRawFrame
+from pipecat.utils.asyncio import TaskManager
 
-# Initialize TTS
-tts = LivetoonTTSService(
-    api_url="https://livetoon-tts.dev-livetoon.com",
-    voice_id="default",
-    sample_rate=24000
-)
+async def main():
+    # TaskManager initialization (required for all Pipecat TTS services)
+    task_manager = TaskManager()
+    task_manager.set_event_loop(asyncio.get_event_loop())
+    
+    # TTS service initialization
+    tts = LivetoonTTSService(
+        api_url="https://livetoon-tts.dev-livetoon.com",
+        voice_id="default",
+        sample_rate=16000  # 16kHz with automatic resampling from 24kHz
+    )
+    tts._task_manager = task_manager
+    
+    # Service lifecycle (await required)
+    await tts.start(StartFrame())
+    
+    # Generate speech
+    async for frame in tts.run_tts("こんにちは"):
+        if isinstance(frame, TTSAudioRawFrame):
+            print(f"Audio: {len(frame.audio)} bytes @ {frame.sample_rate}Hz")
+    
+    await tts.stop(EndFrame())
 
-# Initialize STT with VAD
-stt = LiveToonSTTService(
-    api_url="https://livetoon-stt.dev-livetoon.com", 
-    sample_rate=16000
-)
+# Run the async function
+asyncio.run(main())
 ```
+
+📁 **Complete Example**: See [`example_usage.py`](./example_usage.py) for a full working example with error handling and file output.
 
 ## 🧪 Code examples
 
