@@ -114,7 +114,7 @@ filterwarnings = [
 
 [tool.setuptools_scm]
 local_scheme = "no-local-version"
-fallback_version = "0.0.68.post1"
+fallback_version = "0.0.68"
 version_scheme = "post-release"
 
 [tool.ruff]
