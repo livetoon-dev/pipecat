@@ -409,7 +409,7 @@ class LivetoonTTSService(TTSService):
             # Resample if needed
             if self._resampler:
                 # Resample from 24kHz to target sample rate
-                resampled_data = self._resampler.resample(
+                resampled_data = await self._resampler.resample(
                     pcm_data, self._source_sample_rate, self._sample_rate
                 )
                 logger.debug(
