@@ -180,7 +180,9 @@ class LivetoonTTSService(TTSService):
             connector = aiohttp.TCPConnector(ssl=True)
 
         self._session = aiohttp.ClientSession(
-            headers=headers, connector=connector, timeout=aiohttp.ClientTimeout(total=30)
+            headers=headers, 
+            connector=connector, 
+            timeout=aiohttp.ClientTimeout(total=60, connect=10, sock_read=30)
         )
         logger.debug("Livetoon TTS session started")
 
@@ -364,36 +366,52 @@ class LivetoonTTSService(TTSService):
                     await self.stop_ttfb_metrics()
 
                     # Process streaming audio chunks
-                    chunk_size = 8192  # 8KB chunks optimized for real-time processing
+                    # Server sends 8KB chunks, so we match that for optimal latency
+                    chunk_size = 8192  # 8KB chunks (matches server chunk size)
                     audio_buffer = b""
                     wav_header_size = 44  # Standard WAV header size
                     header_processed = False
+                    total_bytes_processed = 0
 
                     async for chunk in response.content.iter_chunked(chunk_size):
                         if not chunk:
                             break
 
                         audio_buffer += chunk
+                        logger.debug(f"Received chunk: {len(chunk)} bytes, buffer size: {len(audio_buffer)} bytes")
 
                         # Skip WAV header for raw PCM output
-                        if not header_processed and len(audio_buffer) >= wav_header_size:
-                            # Extract raw PCM data (skip WAV header)
-                            pcm_data = audio_buffer[wav_header_size:]
-                            header_processed = True
+                        if not header_processed:
+                            if len(audio_buffer) >= wav_header_size:
+                                # Extract raw PCM data (skip WAV header)
+                                pcm_data = audio_buffer[wav_header_size:]
+                                header_processed = True
+                                audio_buffer = pcm_data  # Keep the PCM data in buffer
+                                logger.debug(f"WAV header processed, PCM data size: {len(pcm_data)} bytes")
+                        
+                        # Process audio data immediately for low latency
+                        # Since server uses pseudo-streaming, we don't need large buffers
+                        if header_processed:
+                            # Process chunks as they arrive for minimal latency
+                            while len(audio_buffer) >= chunk_size:
+                                chunk_to_process = audio_buffer[:chunk_size]
+                                yield await self._create_audio_frame(chunk_to_process)
+                                audio_buffer = audio_buffer[chunk_size:]
+                                total_bytes_processed += len(chunk_to_process)
+                                logger.debug(f"Processed chunk: {len(chunk_to_process)} bytes, total: {total_bytes_processed} bytes")
 
-                            if len(pcm_data) > 0:
-                                # Convert to audio array and yield frame
-                                yield await self._create_audio_frame(pcm_data)
-
-                            audio_buffer = b""
-                        elif header_processed and len(audio_buffer) >= chunk_size:
-                            # Process subsequent chunks
-                            yield await self._create_audio_frame(audio_buffer[:chunk_size])
-                            audio_buffer = audio_buffer[chunk_size:]
-
-                    # Process remaining audio data
+                    # Process any remaining audio data in buffer
                     if header_processed and len(audio_buffer) > 0:
+                        # Ensure the last chunk has even number of bytes for int16 PCM
+                        if len(audio_buffer) % 2 != 0:
+                            logger.warning(f"Final buffer has odd size {len(audio_buffer)}, padding with zero")
+                            audio_buffer += b'\x00'
+                        
                         yield await self._create_audio_frame(audio_buffer)
+                        total_bytes_processed += len(audio_buffer)
+                        logger.debug(f"Processed final chunk: {len(audio_buffer)} bytes, total: {total_bytes_processed} bytes")
+                    
+                    logger.debug(f"Streaming completed. Total PCM bytes processed: {total_bytes_processed}")
 
         except aiohttp.ClientError as e:
             logger.exception(f"HTTP error in Livetoon TTS: {e}")
