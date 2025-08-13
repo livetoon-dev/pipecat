@@ -280,6 +280,55 @@ class LivetoonTTSService(TTSService):
             logger.error(f"Error converting WAV data: {e}")
             return np.array([], dtype=np.float32)
 
+    def _split_text_by_punctuation(self, text: str, max_length: int = 100) -> list[str]:
+        """Split text by punctuation marks to avoid token limit errors.
+        
+        Args:
+            text: Text to split
+            max_length: Maximum length for each chunk (default 100 chars)
+            
+        Returns:
+            List of text chunks
+        """
+        import re
+        
+        # 句読点で分割（。！？!?を区切りとする）
+        sentences = re.split(r'([。！？!?])', text)
+        
+        chunks = []
+        current_chunk = ""
+        
+        for i in range(0, len(sentences)):
+            sentence = sentences[i]
+            
+            # 句読点は前の文に含める
+            if sentence in '。！？!?':
+                if current_chunk:
+                    current_chunk += sentence
+                    # チャンクが長すぎる場合、または句点で終わった場合は区切る
+                    if len(current_chunk) >= max_length or sentence:
+                        chunks.append(current_chunk)
+                        current_chunk = ""
+            else:
+                # 新しい文を追加
+                if len(current_chunk) + len(sentence) > max_length:
+                    # 現在のチャンクを保存して新しいチャンクを開始
+                    if current_chunk:
+                        chunks.append(current_chunk)
+                    current_chunk = sentence
+                else:
+                    current_chunk += sentence
+        
+        # 残りのテキストを追加
+        if current_chunk.strip():
+            chunks.append(current_chunk)
+        
+        # 空のチャンクを除外
+        chunks = [chunk.strip() for chunk in chunks if chunk.strip()]
+        
+        logger.debug(f"Split text into {len(chunks)} chunks: {[len(c) for c in chunks]} chars")
+        return chunks
+
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         """Generate TTS audio frames from text using Livetoon TTS API.
 
@@ -307,111 +356,67 @@ class LivetoonTTSService(TTSService):
             yield TTSStartedFrame()
             yield TTSTextFrame(text)
 
-            # Prepare request data for Livetoon TTS API
-            json_data = {
-                "text": text,
-                "voicepack": self._params.voice,
-                "alpha": self._params.alpha,
-                "beta": self._params.beta,
-                "speed": self._params.speed,
-            }
+            # Split long text by punctuation to avoid token limit errors
+            text_chunks = self._split_text_by_punctuation(text)
+            
+            for chunk_idx, text_chunk in enumerate(text_chunks):
+                logger.debug(f"Processing chunk {chunk_idx + 1}/{len(text_chunks)}: [{text_chunk[:50]}...]")
+                
+                # Prepare request data for Livetoon TTS API
+                json_data = {
+                    "text": text_chunk,
+                    "voicepack": self._params.voice,
+                    "alpha": self._params.alpha,
+                    "beta": self._params.beta,
+                    "speed": self._params.speed,
+                }
 
-            # Use streaming endpoint for better performance
-            stream_url = f"{self._api_url}/speak/stream"
+                # Use regular endpoint and chunk the complete WAV file
+                # This is more efficient than pseudo-streaming since server pre-generates the WAV
+                regular_url = f"{self._api_url}/speak"
 
-            async with self._session.post(stream_url, json=json_data) as response:
-                if response.status != 200:
-                    # Fallback to regular endpoint if streaming fails
-                    logger.warning(
-                        f"Streaming endpoint failed: {response.status}, trying regular endpoint"
-                    )
-                    regular_url = f"{self._api_url}/speak"
+                async with self._session.post(regular_url, json=json_data) as response:
+                    if response.status == 200:
+                        # Get inference time from headers
+                        inference_time = response.headers.get("X-Inference-Time")
+                        if inference_time:
+                            logger.debug(f"TTS inference time for chunk {chunk_idx + 1}: {inference_time}s")
 
-                    async with self._session.post(regular_url, json=json_data) as fallback_response:
-                        if fallback_response.status == 200:
-                            audio_data = await fallback_response.read()
+                        # Stop TTFB metrics only on first chunk
+                        if chunk_idx == 0:
+                            await self.stop_ttfb_metrics()
 
-                            # Process complete audio data inline
-                            if audio_data.startswith(b"RIFF"):
-                                # Skip WAV header (44 bytes) to get raw PCM data
-                                pcm_data = audio_data[44:]
-                                logger.debug(
-                                    f"Extracted {len(pcm_data)} bytes of PCM data from WAV (fallback)"
-                                )
+                        # Read complete WAV file
+                        audio_data = await response.read()
+                        logger.debug(f"Received complete WAV file for chunk {chunk_idx + 1}: {len(audio_data)} bytes")
 
-                                # Split into chunks for streaming simulation
-                                chunk_size = 8192
-                                for i in range(0, len(pcm_data), chunk_size):
-                                    chunk = pcm_data[i : i + chunk_size]
-                                    yield await self._create_audio_frame(chunk)
+                        # Process complete audio data and chunk it for streaming
+                        if audio_data.startswith(b"RIFF"):
+                            # Skip WAV header (44 bytes) to get raw PCM data
+                            pcm_data = audio_data[44:]
+                            logger.debug(f"Extracted {len(pcm_data)} bytes of PCM data from WAV")
 
-                                logger.debug(f"TTS completed (fallback mode)")
-                            else:
-                                logger.error("Invalid audio format received (not WAV)")
-                                yield ErrorFrame("Invalid audio format from TTS API")
-                                return
+                            # Split into optimal chunks for streaming simulation
+                            chunk_size = 1024  # 1KB chunks - standard size used by most TTS services
+                            total_chunks = (len(pcm_data) + chunk_size - 1) // chunk_size
+                            
+                            logger.debug(f"Chunking into {total_chunks} chunks of {chunk_size} bytes")
+                            
+                            for i in range(0, len(pcm_data), chunk_size):
+                                chunk = pcm_data[i : i + chunk_size]
+                                yield await self._create_audio_frame(chunk)
+                                logger.debug(f"Processed chunk {i//chunk_size + 1}/{total_chunks}: {len(chunk)} bytes")
+
+                            logger.debug(f"TTS chunk {chunk_idx + 1} completed - chunked {len(pcm_data)} bytes into {total_chunks} frames")
                         else:
-                            error_text = await fallback_response.text()
-                            logger.error(
-                                f"All endpoints failed: {fallback_response.status} - {error_text}"
-                            )
-                            yield ErrorFrame("TTS API connection failed")
+                            logger.error(f"Invalid audio format received for chunk {chunk_idx + 1} (not WAV)")
+                            yield ErrorFrame("Invalid audio format from TTS API")
                             return
-                else:
-                    # Process streaming response
-                    inference_time = response.headers.get("X-Inference-Time")
-                    if inference_time:
-                        logger.debug(f"TTS inference time: {inference_time}s")
-
-                    await self.stop_ttfb_metrics()
-
-                    # Process streaming audio chunks
-                    # Server sends 8KB chunks, so we match that for optimal latency
-                    chunk_size = 8192  # 8KB chunks (matches server chunk size)
-                    audio_buffer = b""
-                    wav_header_size = 44  # Standard WAV header size
-                    header_processed = False
-                    total_bytes_processed = 0
-
-                    async for chunk in response.content.iter_chunked(chunk_size):
-                        if not chunk:
-                            break
-
-                        audio_buffer += chunk
-                        logger.debug(f"Received chunk: {len(chunk)} bytes, buffer size: {len(audio_buffer)} bytes")
-
-                        # Skip WAV header for raw PCM output
-                        if not header_processed:
-                            if len(audio_buffer) >= wav_header_size:
-                                # Extract raw PCM data (skip WAV header)
-                                pcm_data = audio_buffer[wav_header_size:]
-                                header_processed = True
-                                audio_buffer = pcm_data  # Keep the PCM data in buffer
-                                logger.debug(f"WAV header processed, PCM data size: {len(pcm_data)} bytes")
-                        
-                        # Process audio data immediately for low latency
-                        # Since server uses pseudo-streaming, we don't need large buffers
-                        if header_processed:
-                            # Process chunks as they arrive for minimal latency
-                            while len(audio_buffer) >= chunk_size:
-                                chunk_to_process = audio_buffer[:chunk_size]
-                                yield await self._create_audio_frame(chunk_to_process)
-                                audio_buffer = audio_buffer[chunk_size:]
-                                total_bytes_processed += len(chunk_to_process)
-                                logger.debug(f"Processed chunk: {len(chunk_to_process)} bytes, total: {total_bytes_processed} bytes")
-
-                    # Process any remaining audio data in buffer
-                    if header_processed and len(audio_buffer) > 0:
-                        # Ensure the last chunk has even number of bytes for int16 PCM
-                        if len(audio_buffer) % 2 != 0:
-                            logger.warning(f"Final buffer has odd size {len(audio_buffer)}, padding with zero")
-                            audio_buffer += b'\x00'
-                        
-                        yield await self._create_audio_frame(audio_buffer)
-                        total_bytes_processed += len(audio_buffer)
-                        logger.debug(f"Processed final chunk: {len(audio_buffer)} bytes, total: {total_bytes_processed} bytes")
-                    
-                    logger.debug(f"Streaming completed. Total PCM bytes processed: {total_bytes_processed}")
+                    else:
+                        error_text = await response.text()
+                        logger.error(f"TTS API failed for chunk {chunk_idx + 1}: {response.status} - {error_text}")
+                        yield ErrorFrame(f"TTS API failed: {response.status}")
+                        return
 
         except aiohttp.ClientError as e:
             logger.exception(f"HTTP error in Livetoon TTS: {e}")
@@ -488,7 +493,7 @@ class LivetoonTTSService(TTSService):
             ],
             "performance": {
                 "first_chunk_latency_ms": 260,
-                "chunk_size_bytes": 8192,
+                "chunk_size_bytes": 1024,
                 "sample_rate_hz": 24000,
                 "channels": 1,
                 "bit_depth": 16,
