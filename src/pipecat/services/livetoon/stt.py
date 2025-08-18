@@ -13,7 +13,7 @@ with support for both streaming and batch audio processing.
 import asyncio
 import io
 import tempfile
-from typing import Any, Optional
+from typing import Any, Optional, AsyncGenerator
 
 import aiohttp
 from loguru import logger
@@ -28,7 +28,7 @@ from pipecat.frames.frames import (
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
-from pipecat.services.stt_service import STTService
+from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
@@ -57,7 +57,7 @@ class LivetoonSTTParams(BaseModel):
     )
 
 
-class LiveToonSTTService(STTService):
+class LiveToonSTTService(SegmentedSTTService):
     """LiveToon Parakeet Japanese Speech-to-Text service.
 
     Provides high-quality Japanese speech recognition using LiveToon Parakeet STT API
@@ -122,13 +122,8 @@ class LiveToonSTTService(STTService):
         # HTTP session for API calls
         self._session: aiohttp.ClientSession | None = None
 
-        # Audio buffer for VAD-based dynamic buffering
-        self._audio_buffer = bytearray()
-        self._is_speaking = False
-        self._silence_threshold = params.silence_threshold if hasattr(params, 'silence_threshold') else 1.0
-
         logger.info(
-            f"Initialized LiveToon STT Service - URL: {self._api_url}, Sample Rate: {sample_rate}, VAD-based dynamic buffering enabled"
+            f"Initialized LiveToon STT Service - URL: {self._api_url}, Sample Rate: {sample_rate}"
         )
 
     def can_generate_metrics(self) -> bool:
@@ -193,37 +188,16 @@ class LiveToonSTTService(STTService):
         return None
 
     @traced_stt
-    async def run_stt(self, audio: bytes) -> None:
-        """Process audio chunk using VAD-based dynamic buffering.
+    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
+        """Process audio using Livetoon STT API.
 
         Args:
-            audio: Raw audio data bytes
+            audio: Raw audio data (WAV format for SegmentedSTTService)
+            
+        Yields:
+            Frame: TranscriptionFrame with recognized text
         """
         if not audio:
-            return
-
-        # Always accumulate audio when speaking
-        if self._is_speaking:
-            self._audio_buffer.extend(audio)
-
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        """Process frames including VAD events."""
-        await super().process_frame(frame, direction)
-
-        if isinstance(frame, UserStartedSpeakingFrame):
-            logger.debug("Speech started - beginning audio accumulation")
-            self._is_speaking = True
-            self._audio_buffer = bytearray()  # Reset buffer for new speech
-            
-        elif isinstance(frame, UserStoppedSpeakingFrame):
-            logger.debug("Speech stopped - processing accumulated audio")
-            self._is_speaking = False
-            if len(self._audio_buffer) > 0:
-                await self._process_buffer()
-
-    async def _process_buffer(self):
-        """Process accumulated audio buffer and generate transcription."""
-        if len(self._audio_buffer) == 0:
             return
 
         try:
@@ -231,15 +205,8 @@ class LiveToonSTTService(STTService):
             if not self._session:
                 await self.start(StartFrame())
 
-            # Create temporary WAV file from buffer
-            audio_data = bytes(self._audio_buffer)
-            wav_data = self._create_wav_from_pcm(audio_data)
-
-            # Clear buffer
-            self._audio_buffer = bytearray()
-
-            # Send to STT API
-            transcription_result = await self._transcribe_audio(wav_data)
+            # Send to STT API (audio should already be WAV format from SegmentedSTTService)
+            transcription_result = await self._transcribe_audio(audio)
 
             if transcription_result and transcription_result.get("text"):
                 text = transcription_result["text"].strip()
@@ -249,12 +216,12 @@ class LiveToonSTTService(STTService):
                     confidence_str = f"{confidence:.2f}" if confidence is not None else "N/A"
                     logger.debug(f"STT transcription: [{text}] (confidence: {confidence_str})")
                     
-                    # Emit transcription frames
-                    await self.push_frame(TranscriptionFrame(text, "", time_now_iso8601()))
+                    # Emit transcription frame
+                    yield TranscriptionFrame(text, "", time_now_iso8601())
 
         except Exception as e:
-            logger.exception(f"Error processing STT buffer: {e}")
-            await self.push_frame(ErrorFrame(f"STT error: {str(e)}"))
+            logger.exception(f"Error in STT processing: {e}")
+            yield ErrorFrame(f"STT error: {str(e)}")
 
     def _create_wav_from_pcm(self, pcm_data: bytes) -> bytes:
         """Create WAV file header + PCM data.
@@ -328,12 +295,6 @@ class LiveToonSTTService(STTService):
         except Exception as e:
             logger.exception(f"Unexpected error in LiveToon STT: {e}")
             return None
-
-    async def flush_audio_buffer(self):
-        """Process any remaining audio in buffer."""
-        if len(self._audio_buffer) > 0:
-            logger.debug(f"Flushing remaining {len(self._audio_buffer)} bytes from STT buffer")
-            await self._process_buffer()
 
     @classmethod
     def get_service_config(cls) -> dict[str, Any]:
